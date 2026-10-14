@@ -10,3 +10,4 @@
 
 ### Hướng dẫn cài đặt (Cho Windows)
 * **Tải xuống:** Truy cập mục Releases và tải về file mới nhất.
+* Sau đó giải nén file zip và mở file exe
