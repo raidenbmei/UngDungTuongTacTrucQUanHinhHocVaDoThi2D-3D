@@ -542,6 +542,8 @@
                 titleEl.querySelector('span').textContent = title || "Nhập thông tin";
                 msgEl.textContent = message || "";
                 inputEl.value = defaultValue;
+                inputEl.style.display = 'block';
+                cancelBtn.style.display = 'inline-flex';
                 modal.classList.remove('hidden');
                 inputEl.focus();
                 inputEl.select();
@@ -578,6 +580,100 @@
                 };
             });
         }
+
+        // Global alert/confirm helpers for EXE / WebView compatibility
+        window.appAlert = function(message, opts = {}) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customPromptModal');
+                const titleEl = document.getElementById('customPromptTitle');
+                const msgEl = document.getElementById('customPromptMessage');
+                const inputEl = document.getElementById('customPromptInput');
+                const okBtn = document.getElementById('customPromptOkBtn');
+                const cancelBtn = document.getElementById('customPromptCancelBtn');
+
+                titleEl.querySelector('span').textContent = opts.title || 'Thông báo';
+                msgEl.textContent = message || '';
+                inputEl.value = '';
+                inputEl.style.display = 'none';
+                cancelBtn.style.display = 'none';
+                modal.classList.remove('hidden');
+                okBtn.textContent = opts.okLabel || 'Đóng';
+                okBtn.focus();
+
+                const cleanup = () => {
+                    modal.classList.add('hidden');
+                    okBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                    inputEl.onkeydown = null;
+                };
+
+                okBtn.onclick = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                cancelBtn.onclick = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                inputEl.onkeydown = (e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') {
+                        e.preventDefault();
+                        cleanup();
+                        resolve(true);
+                    }
+                };
+            });
+        };
+
+        window.appConfirm = function(message, opts = {}) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customPromptModal');
+                const titleEl = document.getElementById('customPromptTitle');
+                const msgEl = document.getElementById('customPromptMessage');
+                const inputEl = document.getElementById('customPromptInput');
+                const okBtn = document.getElementById('customPromptOkBtn');
+                const cancelBtn = document.getElementById('customPromptCancelBtn');
+
+                titleEl.querySelector('span').textContent = opts.title || 'Xác nhận';
+                msgEl.textContent = message || '';
+                inputEl.value = '';
+                inputEl.style.display = 'none';
+                cancelBtn.style.display = 'inline-flex';
+                modal.classList.remove('hidden');
+                okBtn.textContent = opts.okLabel || 'Đồng ý';
+                cancelBtn.textContent = opts.cancelLabel || 'Hủy';
+                okBtn.focus();
+
+                const cleanup = () => {
+                    modal.classList.add('hidden');
+                    okBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                    inputEl.onkeydown = null;
+                };
+
+                okBtn.onclick = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                cancelBtn.onclick = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                inputEl.onkeydown = (e) => {
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cleanup();
+                        resolve(false);
+                    }
+                };
+            });
+        };
+
+        window.appPrompt = appPrompt;
 
         // App State
         let scene, camera, renderer, controls;
@@ -952,7 +1048,7 @@
                     const dir = vTo.point.clone().sub(vFrom.point);
                     const len = dir.length();
                     if (len > 1e-4) {
-                        dir.normalize();
+                        dir.normalize
                         vec.arrowHelper.position.copy(vFrom.point);
                         vec.arrowHelper.setDirection(dir);
                         vec.arrowHelper.setLength(len, Math.min(0.5, len * 0.3), Math.min(0.3, len * 0.18));
@@ -2130,6 +2226,18 @@
             const { jsonMode = false, temperature = 0.2 } = options;
             const url = "https://api.groq.com/openai/v1/chat/completions";
             let lastErr = null;
+
+            const safeMessages = messages.map((msg, index) => {
+                if (!msg || typeof msg.content !== 'string') return msg;
+                if (jsonMode && index === 0) {
+                    return {
+                        ...msg,
+                        content: msg.content + "\nTrả về CHỈ JSON thuần, không markdown, không code block."
+                    };
+                }
+                return msg;
+            });
+
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
                     const response = await fetch(url, {
@@ -2140,9 +2248,11 @@
                         },
                         body: JSON.stringify({
                             model: "openai/gpt-oss-120b",
-                            messages,
+                            messages: safeMessages,
                             temperature,
-                            ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+                            // Groq/OpenAI-compatible endpoint này không chấp nhận response_format=json_object
+                            // với model openai/gpt-oss-120b đôi khi báo lỗi "messages must contain the word 'json'..."
+                            // nên dùng JSON prompt rõ ràng thay cho response_format.
                         })
                     });
                     const data = await response.json();
@@ -2152,6 +2262,10 @@
                         response.status === 503 ||
                         /overloaded|unavailable/i.test(errMsg)
                     );
+
+                    if (!data || !Array.isArray(data.choices)) {
+                        throw new Error("AI không trả về dữ liệu hợp lệ. Vui lòng thử lại.");
+                    }
 
                     if (isRateLimited) {
                         const retryAfterHeader = response.headers.get('retry-after');
@@ -2319,7 +2433,7 @@ QUY TẮC BẮT BUỘC:
 
             try {
                 const messages = [{ role: "system", content: systemPrompt }, ...formulaChatHistory];
-                const data = await callGroqWithRetry(GROQ_API_KEY_CHAT, messages, { temperature: 0.1 });
+                const data = await callGroqWithRetry(GROQ_API_KEY_CHAT, messages, { jsonMode: false, temperature: 0.2 });
                 
                 let replyText = data.choices[0].message.content;
                 replyText = formatMathSymbols(replyText);
@@ -2360,7 +2474,7 @@ QUY TẮC BẮT BUỘC:
             }).filter(v => v[0] && v[1]);
 
             const currentCircles = circlesData.map(c => {
-                const center = verticesData.find(v => v.id === c.centerId)?.name;
+                const center = verticesData.find(v => v.id === c.centerId);
                 return center ? { center, radius: c.radius, normal: threeToAiNormal(c.normal) } : null;
             }).filter(Boolean);
 
